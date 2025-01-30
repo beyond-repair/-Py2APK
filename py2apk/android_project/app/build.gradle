@@ -1,0 +1,31 @@
+apply plugin: 'com.android.application'
+apply plugin: 'com.chaquo.python'
+
+android {
+    compileSdkVersion 34
+    defaultConfig {
+        applicationId "com.example.py2apk"
+        minSdkVersion 21
+        targetSdkVersion 34
+        versionCode 1
+        versionName "1.0"
+    }
+    buildTypes {
+        release {
+            minifyEnabled true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
+}
+
+chaquopy {
+    version "12.0.0"
+    python {
+        version "3.8"
+        pip {
+            install "requests"
+            install "onnxruntime"
+            install "torch"
+        }
+    }
+}
