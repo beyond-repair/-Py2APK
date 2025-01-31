@@ -4,14 +4,18 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "py2apk"
-version = "0.1.0"
-description = "Python to Android APK converter"
+version = "1.0.0"
+description = "Python to Android APK Converter"
+readme = "README.md"
 requires-python = ">=3.8"
 dependencies = [
     "click>=8.1",
-    "packaging>=23.0",
-    "pyyaml>=6.0"
+    "numpy>=1.23",
+    "onnxruntime>=1.13"
 ]
 
 [project.scripts]
 py2apk = "py2apk.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["py2apk"]
