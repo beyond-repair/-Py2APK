@@ -1,88 +1,92 @@
+"""APK building functionality"""
 import subprocess
-import shutil
-from pathlib import Path
 import logging
-from py2apk.utils.manifest import ManifestGenerator
-from py2apk.config import config
+from pathlib import Path
+from typing import Optional, Callable
+from .config import DEFAULT_CONFIG, find_android_sdk
 
 logger = logging.getLogger(__name__)
 
 class APKBuilder:
-    """Handles Android project generation, Chaquopy integration, and APK building."""
-
+    """Handles Android project creation and APK building"""
+    
     def __init__(self, project_path: Path, output_dir: Path):
+        """
+        Initialize builder
+        
+        Args:
+            project_path (Path): Source Python project path
+            output_dir (Path): Output directory for APK
+        """
         self.project_path = project_path
         self.output_dir = output_dir
-        self.android_project_path = output_dir / "android_project"
-
-    def _copy_native_libraries(self):
-        """Copy pre-built native libraries for Chaquopy."""
-        native_libs_dir = self.android_project_path / "app/src/main/jniLibs"
-        native_libs_dir.mkdir(parents=True, exist_ok=True)
-
-        # Copy pre-built .so files for ONNX Runtime, Torch, etc.
-        for arch in ["armeabi-v7a", "arm64-v8a", "x86", "x86_64"]:
-            arch_dir = native_libs_dir / arch
-            arch_dir.mkdir(exist_ok=True)
-            shutil.copy(f"native_libs/{arch}/libonnxruntime.so", arch_dir)
-            shutil.copy(f"native_libs/{arch}/libtorch.so", arch_dir)
-
-        logger.info("Copied native libraries for Chaquopy.")
-
-    def create_android_project(self):
-        """Generate Android project structure for Chaquopy."""
-        if self.android_project_path.exists():
-            shutil.rmtree(self.android_project_path)
+        self.android_sdk = find_android_sdk()
         
-        self.android_project_path.mkdir(parents=True)
-        (self.android_project_path / "app/src/main/python").mkdir(parents=True)
-
-        # Copy user Python files
-        for file in self.project_path.glob("*.py"):
-            shutil.copy(file, self.android_project_path / "app/src/main/python/")
-
-        # Generate Manifest
-        ManifestGenerator().create_manifest(self.android_project_path, config)
-
-        # Copy Gradle template
-        gradle_template = Path(__file__).parent / "templates/build.gradle"
-        shutil.copy(gradle_template, self.android_project_path / "app/build.gradle")
-
-        # Generate Chaquopy configuration
-        chaquopy_config = f"""
-android {{
-    compileSdkVersion {config['target_sdk']}
-    defaultConfig {{
-        minSdkVersion {config['min_sdk']}
-        targetSdkVersion {config['target_sdk']}
-    }}
-}}
-apply plugin: 'com.chaquo.python'
-
-chaquopy {{
-    version "{config['chaquopy_version']}"
-    python {{
-        version "{config['python_version']}"
-        pip {{
-            install "requests"
-            install "onnxruntime"
-            install "torch"
-        }}
-    }}
-}}
-"""
-        (self.android_project_path / "app/chaquopy.gradle").write_text(chaquopy_config)
-
-        logger.info(f"Android project created at {self.android_project_path}")
-
-    def build_apk(self):
-        """Build APK using Chaquopy"""
+    def create_android_project(self) -> bool:
+        """Create Chaquopy Android project structure"""
         try:
-            self.create_android_project()
-            subprocess.run(["gradle", "assembleRelease", "-p", str(self.android_project_path)], check=True)
-
-            apk_path = self.output_dir / "app-release.apk"
-            return apk_path if apk_path.exists() else None
+            # Create directory structure
+            (self.output_dir / "app/src/main/python").mkdir(parents=True, exist_ok=True)
+            
+            # Copy project files
+            subprocess.run(
+                ["cp", "-r", f"{self.project_path}/*", 
+                 f"{self.output_dir}/app/src/main/python/"],
+                check=True
+            )
+            
+            # Generate Gradle config
+            self._generate_gradle_config()
+            return True
+            
         except subprocess.CalledProcessError as e:
-            logger.error(f"APK build failed: {e}")
-            return None
+            logger.error(f"Project creation failed: {str(e)}")
+            return False
+
+    def _generate_gradle_config(self):
+        """Generate Android build configuration"""
+        gradle_template = f"""
+        android {{
+            compileSdk {DEFAULT_CONFIG['PYTHON_VERSION']}
+            ndkVersion "25.1.8937393"
+            
+            defaultConfig {{
+                minSdk 21
+                targetSdk 33
+                python {{
+                    version "{DEFAULT_CONFIG['PYTHON_VERSION']}"
+                }}
+            }}
+        }}
+        """
+        (self.output_dir / "build.gradle").write_text(gradle_template)
+
+    def build_apk(self, callback: Optional[Callable] = None) -> bool:
+        """
+        Build APK package
+        
+        Args:
+            callback (Callable): Progress callback function
+            
+        Returns:
+            bool: True if build successful
+        """
+        try:
+            result = subprocess.run(
+                ["./gradlew", "assembleRelease"],
+                cwd=self.output_dir,
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True
+            )
+            
+            if callback:
+                for line in result.stdout.splitlines():
+                    callback(line.strip())
+                    
+            return True
+            
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Build failed: {e.stdout}")
+            return False
